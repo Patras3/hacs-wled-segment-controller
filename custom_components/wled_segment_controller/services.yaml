@@ -1,6 +1,6 @@
 apply_effect:
   name: Apply Effect
-  description: Apply an effect to a specific WLED segment with optional auto-restore.
+  description: Apply an effect to specific WLED segment(s) with optional auto-restore.
   target:
     entity:
       integration: wled
@@ -8,28 +8,153 @@ apply_effect:
   fields:
     segment:
       name: Segment
-      description: Segment name or ID to apply the effect to.
+      description: Segment name(s) or ID(s). Use comma-separated for multiple (e.g. "Drzwi, Ulica" or "0, 1").
       required: true
       example: "Drzwi"
       selector:
         text:
     color:
       name: Color
-      description: Color as hex string (#RRGGBB) or RGB array [R, G, B].
+      description: Primary color for the effect.
       required: false
-      example: "#00FF00"
+      selector:
+        color_rgb:
+    secondary_color:
+      name: Secondary Color
+      description: Secondary color (used by dual-color effects like Chase, Scan Dual).
+      required: false
+      selector:
+        color_rgb:
+    tertiary_color:
+      name: Tertiary Color
+      description: Third color (used by tri-color effects like Tri Wipe, Traffic Light).
+      required: false
       selector:
         color_rgb:
     effect:
       name: Effect
-      description: Effect name or ID.
+      description: WLED effect to apply.
       required: false
-      example: "Chase"
+      default: "Solid"
       selector:
-        text:
+        select:
+          mode: dropdown
+          options:
+            - "Solid"
+            - "Blink"
+            - "Breathe"
+            - "Wipe"
+            - "Wipe Random"
+            - "Random Colors"
+            - "Sweep"
+            - "Dynamic"
+            - "Colorloop"
+            - "Rainbow"
+            - "Scan"
+            - "Scan Dual"
+            - "Fade"
+            - "Theater"
+            - "Theater Rainbow"
+            - "Running"
+            - "Saw"
+            - "Twinkle"
+            - "Dissolve"
+            - "Sparkle"
+            - "Sparkle Dark"
+            - "Sparkle+"
+            - "Strobe"
+            - "Strobe Rainbow"
+            - "Strobe Mega"
+            - "Blink Rainbow"
+            - "Android"
+            - "Chase"
+            - "Chase Random"
+            - "Chase Rainbow"
+            - "Chase Flash"
+            - "Rainbow Runner"
+            - "Colorful"
+            - "Traffic Light"
+            - "Sweep Random"
+            - "Chase 2"
+            - "Aurora"
+            - "Stream"
+            - "Scanner"
+            - "Lighthouse"
+            - "Fireworks"
+            - "Rain"
+            - "Fire Flicker"
+            - "Gradient"
+            - "Loading"
+            - "Fairy"
+            - "Two Dots"
+            - "Fairytwinkle"
+            - "Running Dual"
+            - "Chase 3"
+            - "Tri Wipe"
+            - "Tri Fade"
+            - "Lightning"
+            - "ICU"
+            - "Multi Comet"
+            - "Dual Scanner"
+            - "Stream 2"
+            - "Oscillate"
+            - "Pride 2015"
+            - "Juggle"
+            - "Palette"
+            - "Fire 2012"
+            - "Colorwaves"
+            - "BPM"
+            - "Fill Noise"
+            - "Noise 1"
+            - "Noise 2"
+            - "Noise 3"
+            - "Noise 4"
+            - "Colortwinkles"
+            - "Lake"
+            - "Meteor"
+            - "Smooth Meteor"
+            - "Railway"
+            - "Ripple"
+            - "Twinklefox"
+            - "Twinklecat"
+            - "Halloween Eyes"
+            - "Solid Pattern"
+            - "Solid Pattern Tri"
+            - "Spots"
+            - "Spots Fade"
+            - "Glitter"
+            - "Candle"
+            - "Fireworks Starburst"
+            - "Fireworks 1D"
+            - "Bouncing Balls"
+            - "Sinelon"
+            - "Sinelon Dual"
+            - "Sinelon Rainbow"
+            - "Popcorn"
+            - "Drip"
+            - "Plasma"
+            - "Percent"
+            - "Ripple Rainbow"
+            - "Heartbeat"
+            - "Pacifica"
+            - "Candle Multi"
+            - "Solid Glitter"
+            - "Sunrise"
+            - "Phased"
+            - "TwinkleUp"
+            - "Noise Pal"
+            - "Sine"
+            - "Phased Noise"
+            - "Flow"
+            - "Chunchun"
+            - "Dancing Shadows"
+            - "Washing Machine"
+            - "Blends"
+            - "TV Simulator"
+            - "Dynamic Smooth"
     speed:
       name: Speed
-      description: Effect speed (0-255).
+      description: Effect speed.
       required: false
       default: 128
       selector:
@@ -39,7 +164,7 @@ apply_effect:
           mode: slider
     intensity:
       name: Intensity
-      description: Effect intensity (0-255).
+      description: Effect intensity.
       required: false
       default: 128
       selector:
@@ -49,18 +174,17 @@ apply_effect:
           mode: slider
     brightness:
       name: Brightness
-      description: Segment brightness (0-255).
+      description: Segment brightness.
       required: false
       selector:
         number:
-          min: 0
+          min: 1
           max: 255
           mode: slider
     duration:
       name: Duration
-      description: Duration in seconds before auto-restoring the previous state.
+      description: Auto-restore previous state after this many seconds. Leave empty for permanent change.
       required: false
-      example: 120
       selector:
         number:
           min: 1
@@ -70,7 +194,7 @@ apply_effect:
 
 restore_segment:
   name: Restore Segment
-  description: Manually restore a segment to its saved state before the last effect was applied.
+  description: Restore segment(s) to state before last effect. Segment names comma-separated for multiple.
   target:
     entity:
       integration: wled
@@ -78,7 +202,7 @@ restore_segment:
   fields:
     segment:
       name: Segment
-      description: Segment name or ID to restore.
+      description: Segment name(s) or ID(s) to restore.
       required: true
       example: "Drzwi"
       selector:
@@ -86,32 +210,32 @@ restore_segment:
 
 save_state:
   name: Save State
-  description: Save the current state of all segments as a named snapshot.
+  description: Save current state of all segments as a named snapshot.
   target:
     entity:
       integration: wled
       domain: light
   fields:
     name:
-      name: Name
-      description: Name for the saved state snapshot.
+      name: Snapshot Name
+      description: Name for this snapshot (use to restore later).
       required: true
-      example: "evening_ambiance"
+      example: "before_alarm"
       selector:
         text:
 
 restore_state:
   name: Restore State
-  description: Restore a previously saved named state snapshot.
+  description: Restore a previously saved state snapshot.
   target:
     entity:
       integration: wled
       domain: light
   fields:
     name:
-      name: Name
-      description: Name of the saved state snapshot to restore.
+      name: Snapshot Name
+      description: Name of the snapshot to restore.
       required: true
-      example: "evening_ambiance"
+      example: "before_alarm"
       selector:
         text:

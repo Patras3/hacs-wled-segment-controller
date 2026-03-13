@@ -81,15 +81,23 @@ class WLEDApi:
         segment_id: int,
         *,
         color: list[int] | None = None,
+        colors: list[list[int]] | None = None,
         effect: int | None = None,
         speed: int | None = None,
         intensity: int | None = None,
         brightness: int | None = None,
     ) -> dict[str, Any]:
-        """Apply effect settings to a specific segment."""
+        """Apply effect settings to a specific segment.
+        
+        Args:
+            colors: List of up to 3 RGB colors [[R,G,B], [R,G,B], [R,G,B]]
+            color: Single RGB color (legacy, use colors for multi)
+        """
         seg_data: dict[str, Any] = {"id": segment_id}
 
-        if color is not None:
+        if colors is not None:
+            seg_data["col"] = colors
+        elif color is not None:
             seg_data["col"] = [color]
         if effect is not None:
             seg_data["fx"] = effect
