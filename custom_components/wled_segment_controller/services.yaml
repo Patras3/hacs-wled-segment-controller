@@ -1,0 +1,117 @@
+apply_effect:
+  name: Apply Effect
+  description: Apply an effect to a specific WLED segment with optional auto-restore.
+  target:
+    entity:
+      integration: wled
+      domain: light
+  fields:
+    segment:
+      name: Segment
+      description: Segment name or ID to apply the effect to.
+      required: true
+      example: "Drzwi"
+      selector:
+        text:
+    color:
+      name: Color
+      description: Color as hex string (#RRGGBB) or RGB array [R, G, B].
+      required: false
+      example: "#00FF00"
+      selector:
+        color_rgb:
+    effect:
+      name: Effect
+      description: Effect name or ID.
+      required: false
+      example: "Chase"
+      selector:
+        text:
+    speed:
+      name: Speed
+      description: Effect speed (0-255).
+      required: false
+      default: 128
+      selector:
+        number:
+          min: 0
+          max: 255
+          mode: slider
+    intensity:
+      name: Intensity
+      description: Effect intensity (0-255).
+      required: false
+      default: 128
+      selector:
+        number:
+          min: 0
+          max: 255
+          mode: slider
+    brightness:
+      name: Brightness
+      description: Segment brightness (0-255).
+      required: false
+      selector:
+        number:
+          min: 0
+          max: 255
+          mode: slider
+    duration:
+      name: Duration
+      description: Duration in seconds before auto-restoring the previous state.
+      required: false
+      example: 120
+      selector:
+        number:
+          min: 1
+          max: 86400
+          unit_of_measurement: seconds
+          mode: box
+
+restore_segment:
+  name: Restore Segment
+  description: Manually restore a segment to its saved state before the last effect was applied.
+  target:
+    entity:
+      integration: wled
+      domain: light
+  fields:
+    segment:
+      name: Segment
+      description: Segment name or ID to restore.
+      required: true
+      example: "Drzwi"
+      selector:
+        text:
+
+save_state:
+  name: Save State
+  description: Save the current state of all segments as a named snapshot.
+  target:
+    entity:
+      integration: wled
+      domain: light
+  fields:
+    name:
+      name: Name
+      description: Name for the saved state snapshot.
+      required: true
+      example: "evening_ambiance"
+      selector:
+        text:
+
+restore_state:
+  name: Restore State
+  description: Restore a previously saved named state snapshot.
+  target:
+    entity:
+      integration: wled
+      domain: light
+  fields:
+    name:
+      name: Name
+      description: Name of the saved state snapshot to restore.
+      required: true
+      example: "evening_ambiance"
+      selector:
+        text:
