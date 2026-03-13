@@ -54,25 +54,29 @@ APPLY_EFFECT_SCHEMA = vol.Schema(
             cv.positive_int, vol.Range(min=0, max=255)
         ),
         vol.Optional(ATTR_DURATION): cv.positive_int,
-    }
+    },
+    extra=vol.ALLOW_EXTRA,
 )
 
 RESTORE_SEGMENT_SCHEMA = vol.Schema(
     {
         vol.Required(ATTR_SEGMENT): vol.Any(cv.string, cv.positive_int),
-    }
+    },
+    extra=vol.ALLOW_EXTRA,
 )
 
 SAVE_STATE_SCHEMA = vol.Schema(
     {
         vol.Required(ATTR_NAME): cv.string,
-    }
+    },
+    extra=vol.ALLOW_EXTRA,
 )
 
 RESTORE_STATE_SCHEMA = vol.Schema(
     {
         vol.Required(ATTR_NAME): cv.string,
-    }
+    },
+    extra=vol.ALLOW_EXTRA,
 )
 
 
