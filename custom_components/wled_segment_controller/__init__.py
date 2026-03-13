@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 import voluptuous as vol
@@ -41,21 +42,24 @@ ATTR_TERTIARY_COLOR = "tertiary_color"
 SAVED_STATES: dict[str, dict[str, Any]] = {}
 PENDING_RESTORES: dict[str, dict[str, Any]] = {}
 
+# Regex to extract segment number from entity_id
+# light.wled_segment_1 → 1, light.wled_segment_2 → 2
+# light.wled or light.wled_main → 0 (master = segment 0)
+_SEG_RE = re.compile(r"_segment_(\d+)$")
 
-def _parse_segments(raw: Any) -> list[str | int]:
-    """Parse segment field: supports comma-separated names/ids or single value."""
-    if isinstance(raw, int):
-        return [raw]
-    if isinstance(raw, str):
-        parts = [s.strip() for s in raw.split(",") if s.strip()]
-        result: list[str | int] = []
-        for p in parts:
-            try:
-                result.append(int(p))
-            except ValueError:
-                result.append(p)
-        return result
-    return [raw]
+
+def _entity_to_segment_id(entity_id: str) -> int:
+    """Extract WLED segment ID from entity_id.
+    
+    light.wled_segment_1 → 1
+    light.wled_segment_2 → 2
+    light.wled / light.wled_main → 0
+    """
+    m = _SEG_RE.search(entity_id)
+    if m:
+        return int(m.group(1))
+    # Master entity = segment 0
+    return 0
 
 
 def _extract_entity_ids(call: ServiceCall) -> list[str]:
@@ -66,10 +70,21 @@ def _extract_entity_ids(call: ServiceCall) -> list[str]:
     return entity_ids
 
 
-# Service schemas — extra=ALLOW_EXTRA because HA injects entity_id from target
+def _build_colors(call_data: dict) -> list[list[int]] | None:
+    """Build WLED color array from up to 3 color fields."""
+    colors: list[list[int]] = []
+    for attr in (ATTR_COLOR, ATTR_SECONDARY_COLOR, ATTR_TERTIARY_COLOR):
+        raw = call_data.get(attr)
+        if raw is not None:
+            colors.append(parse_color(raw))
+        else:
+            break  # WLED expects contiguous colors
+    return colors if colors else None
+
+
+# Service schemas — extra=ALLOW_EXTRA for HA-injected entity_id
 APPLY_EFFECT_SCHEMA = vol.Schema(
     {
-        vol.Required(ATTR_SEGMENT): vol.Any(cv.string, cv.positive_int),
         vol.Optional(ATTR_COLOR): vol.Any(
             cv.string,
             vol.All(cv.ensure_list, [vol.Coerce(int)]),
@@ -98,9 +113,7 @@ APPLY_EFFECT_SCHEMA = vol.Schema(
 )
 
 RESTORE_SEGMENT_SCHEMA = vol.Schema(
-    {
-        vol.Required(ATTR_SEGMENT): vol.Any(cv.string, cv.positive_int),
-    },
+    {},
     extra=vol.ALLOW_EXTRA,
 )
 
@@ -168,25 +181,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             _LOGGER.error("Effect '%s' not found on WLED", effect)
         return eid
 
-    def _build_colors(call_data: dict) -> list[list[int]] | None:
-        """Build WLED color array from up to 3 color fields."""
-        colors: list[list[int]] = []
-        for attr in (ATTR_COLOR, ATTR_SECONDARY_COLOR, ATTR_TERTIARY_COLOR):
-            raw = call_data.get(attr)
-            if raw is not None:
-                colors.append(parse_color(raw))
-            else:
-                break  # WLED expects contiguous colors
-        return colors if colors else None
-
     async def handle_apply_effect(call: ServiceCall) -> None:
-        """Handle apply_effect service call."""
+        """Handle apply_effect service call.
+        
+        Target entity_ids determine WHICH segments to control.
+        light.wled_segment_1 → segment 1
+        light.wled_segment_2 → segment 2
+        light.wled / light.wled_main → segment 0
+        Multiple targets = multiple segments affected.
+        """
         entity_ids = _extract_entity_ids(call)
         if not entity_ids:
             _LOGGER.error("No entity_id specified in target")
             return
 
-        segments = _parse_segments(call.data[ATTR_SEGMENT])
         colors = _build_colors(call.data)
         effect = call.data.get(ATTR_EFFECT)
         speed = call.data.get(ATTR_SPEED, DEFAULT_SPEED)
@@ -194,26 +202,33 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         brightness = call.data.get(ATTR_BRIGHTNESS)
         duration = call.data.get(ATTR_DURATION)
 
+        # Group entities by WLED host (one API instance per device)
+        host_segments: dict[str, list[tuple[str, int]]] = {}
         for entity_id in entity_ids:
-            api = await async_get_api(entity_id)
-            if not api:
+            host = await async_get_wled_ip(entity_id)
+            if not host:
                 continue
+            seg_id = _entity_to_segment_id(entity_id)
+            host_segments.setdefault(host, []).append((entity_id, seg_id))
+
+        session = async_get_clientsession(hass)
+
+        for host, segments in host_segments.items():
+            api = WLEDApi(host, session)
 
             effect_id = await _resolve_effect_id(api, effect)
             if effect is not None and effect_id is None:
-                continue  # effect not found, skip
+                continue
 
-            for seg_ref in segments:
+            for entity_id, segment_id in segments:
                 try:
-                    segment_id = await api.find_segment_id(seg_ref)
-
-                    # Save current state if duration is set (for auto-restore)
+                    # Save current state if duration is set
                     if duration:
                         current_state = await api.get_segment_state(segment_id)
                         restore_key = f"{entity_id}_{segment_id}"
                         PENDING_RESTORES[restore_key] = {
                             "state": current_state,
-                            "api_host": api.host,
+                            "api_host": host,
                         }
 
                         @callback
@@ -235,14 +250,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                         brightness=brightness,
                     )
 
-                    _LOGGER.debug(
+                    _LOGGER.info(
                         "Applied effect to segment %s (%s) on %s",
-                        seg_ref, segment_id, entity_id,
+                        segment_id, entity_id, host,
                     )
 
                 except WLEDApiError as err:
                     _LOGGER.error(
-                        "Failed to apply effect to segment %s: %s", seg_ref, err
+                        "Failed to apply effect to segment %s: %s",
+                        segment_id, err,
                     )
 
     async def async_restore_segment_state(restore_key: str) -> None:
@@ -260,38 +276,31 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         try:
             segment_id = state.get("id", 0)
             await api.restore_segment(segment_id, state)
-            _LOGGER.debug("Restored segment %s on %s", segment_id, host)
+            _LOGGER.info("Restored segment %s on %s", segment_id, host)
         except WLEDApiError as err:
             _LOGGER.error("Failed to restore segment: %s", err)
 
     async def handle_restore_segment(call: ServiceCall) -> None:
-        """Handle restore_segment service call."""
+        """Handle restore_segment service call.
+        
+        Target entity_ids determine which segments to restore.
+        """
         entity_ids = _extract_entity_ids(call)
         if not entity_ids:
             _LOGGER.error("No entity_id specified in target")
             return
 
-        segments = _parse_segments(call.data[ATTR_SEGMENT])
-
         for entity_id in entity_ids:
-            api = await async_get_api(entity_id)
-            if not api:
-                continue
+            segment_id = _entity_to_segment_id(entity_id)
+            restore_key = f"{entity_id}_{segment_id}"
 
-            for seg_ref in segments:
-                try:
-                    segment_id = await api.find_segment_id(seg_ref)
-                    restore_key = f"{entity_id}_{segment_id}"
-
-                    if restore_key in PENDING_RESTORES:
-                        await async_restore_segment_state(restore_key)
-                    else:
-                        _LOGGER.warning(
-                            "No saved state for segment %s on %s",
-                            seg_ref, entity_id,
-                        )
-                except WLEDApiError as err:
-                    _LOGGER.error("Failed to restore segment %s: %s", seg_ref, err)
+            if restore_key in PENDING_RESTORES:
+                await async_restore_segment_state(restore_key)
+            else:
+                _LOGGER.warning(
+                    "No saved state for segment %s (%s)",
+                    segment_id, entity_id,
+                )
 
     async def handle_save_state(call: ServiceCall) -> None:
         """Handle save_state service call."""
@@ -302,17 +311,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
         name = call.data[ATTR_NAME]
 
-        for entity_id in entity_ids:
-            api = await async_get_api(entity_id)
-            if not api:
-                continue
-            try:
-                state = await api.get_state()
-                state_key = f"{entity_id}_{name}"
-                SAVED_STATES[state_key] = state
-                _LOGGER.debug("Saved state '%s' for %s", name, entity_id)
-            except WLEDApiError as err:
-                _LOGGER.error("Failed to save state: %s", err)
+        # Use first entity to find the WLED host, save full state
+        api = await async_get_api(entity_ids[0])
+        if not api:
+            return
+        try:
+            state = await api.get_state()
+            state_key = f"{api.host}_{name}"
+            SAVED_STATES[state_key] = state
+            _LOGGER.info("Saved state '%s' for %s", name, api.host)
+        except WLEDApiError as err:
+            _LOGGER.error("Failed to save state: %s", err)
 
     async def handle_restore_state(call: ServiceCall) -> None:
         """Handle restore_state service call."""
@@ -323,22 +332,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
         name = call.data[ATTR_NAME]
 
-        for entity_id in entity_ids:
-            api = await async_get_api(entity_id)
-            if not api:
-                continue
+        api = await async_get_api(entity_ids[0])
+        if not api:
+            return
 
-            state_key = f"{entity_id}_{name}"
-            if state_key not in SAVED_STATES:
-                _LOGGER.warning("No saved state '%s' for %s", name, entity_id)
-                continue
+        state_key = f"{api.host}_{name}"
+        if state_key not in SAVED_STATES:
+            _LOGGER.warning("No saved state '%s' for %s", name, api.host)
+            return
 
-            try:
-                saved_state = SAVED_STATES[state_key]
-                await api.set_state(saved_state)
-                _LOGGER.debug("Restored state '%s' for %s", name, entity_id)
-            except WLEDApiError as err:
-                _LOGGER.error("Failed to restore state: %s", err)
+        try:
+            saved_state = SAVED_STATES[state_key]
+            await api.set_state(saved_state)
+            _LOGGER.info("Restored state '%s' for %s", name, api.host)
+        except WLEDApiError as err:
+            _LOGGER.error("Failed to restore state: %s", err)
 
     # Register services
     hass.services.async_register(

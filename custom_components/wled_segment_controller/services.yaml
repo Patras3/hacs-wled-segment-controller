@@ -1,18 +1,13 @@
 apply_effect:
   name: Apply Effect
-  description: Apply an effect to specific WLED segment(s) with optional auto-restore.
+  description: >
+    Apply an effect to WLED segment(s). Select segment entities in Target
+    (e.g. WLED Segment 1, Segment 2). Multiple segments supported.
   target:
     entity:
       integration: wled
       domain: light
   fields:
-    segment:
-      name: Segment
-      description: Segment name(s) or ID(s). Use comma-separated for multiple (e.g. "Drzwi, Ulica" or "0, 1").
-      required: true
-      example: "Drzwi"
-      selector:
-        text:
     color:
       name: Color
       description: Primary color for the effect.
@@ -194,23 +189,17 @@ apply_effect:
 
 restore_segment:
   name: Restore Segment
-  description: Restore segment(s) to state before last effect. Segment names comma-separated for multiple.
+  description: >
+    Restore segment(s) to state before last effect was applied.
+    Select segment entities in Target.
   target:
     entity:
       integration: wled
       domain: light
-  fields:
-    segment:
-      name: Segment
-      description: Segment name(s) or ID(s) to restore.
-      required: true
-      example: "Drzwi"
-      selector:
-        text:
 
 save_state:
   name: Save State
-  description: Save current state of all segments as a named snapshot.
+  description: Save the current state of all segments as a named snapshot.
   target:
     entity:
       integration: wled
