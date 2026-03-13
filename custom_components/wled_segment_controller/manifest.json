@@ -5,8 +5,8 @@
   "config_flow": true,
   "dependencies": [],
   "documentation": "https://github.com/Patras3/hacs-wled-segment-controller",
-  "integration_type": "service",
-  "iot_class": "local_push",
+  "integration_type": "hub",
+  "iot_class": "local_polling",
   "issue_tracker": "https://github.com/Patras3/hacs-wled-segment-controller/issues",
   "requirements": [],
   "version": "1.0.0"

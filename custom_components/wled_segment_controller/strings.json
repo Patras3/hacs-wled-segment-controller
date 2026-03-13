@@ -3,77 +3,19 @@
     "step": {
       "user": {
         "title": "WLED Segment Controller",
-        "description": "This integration adds per-segment effect control to your WLED devices. Click Submit to enable."
+        "description": "Select the WLED device to add segment control for. Segments will be discovered automatically from WLED API.",
+        "data": {
+          "wled_device": "WLED Device"
+        }
       }
     },
     "abort": {
-      "single_instance_allowed": "Already configured. Only a single instance is needed."
-    }
-  },
-  "services": {
-    "apply_effect": {
-      "name": "Apply Effect",
-      "description": "Apply an effect to a specific WLED segment with optional auto-restore.",
-      "fields": {
-        "segment": {
-          "name": "Segment",
-          "description": "Segment name or ID to apply the effect to."
-        },
-        "color": {
-          "name": "Color",
-          "description": "Color as hex string (#RRGGBB) or RGB array [R, G, B]."
-        },
-        "effect": {
-          "name": "Effect",
-          "description": "Effect name or ID."
-        },
-        "speed": {
-          "name": "Speed",
-          "description": "Effect speed (0-255)."
-        },
-        "intensity": {
-          "name": "Intensity",
-          "description": "Effect intensity (0-255)."
-        },
-        "brightness": {
-          "name": "Brightness",
-          "description": "Segment brightness (0-255)."
-        },
-        "duration": {
-          "name": "Duration",
-          "description": "Duration in seconds before auto-restoring the previous state."
-        }
-      }
+      "already_configured": "This WLED device is already configured",
+      "no_wled_devices": "No WLED devices found. Please set up the native WLED integration first.",
+      "device_not_found": "Selected WLED device not found"
     },
-    "restore_segment": {
-      "name": "Restore Segment",
-      "description": "Manually restore a segment to its saved state before the last effect was applied.",
-      "fields": {
-        "segment": {
-          "name": "Segment",
-          "description": "Segment name or ID to restore."
-        }
-      }
-    },
-    "save_state": {
-      "name": "Save State",
-      "description": "Save the current state of all segments as a named snapshot.",
-      "fields": {
-        "name": {
-          "name": "Name",
-          "description": "Name for the saved state snapshot."
-        }
-      }
-    },
-    "restore_state": {
-      "name": "Restore State",
-      "description": "Restore a previously saved named state snapshot.",
-      "fields": {
-        "name": {
-          "name": "Name",
-          "description": "Name of the saved state snapshot to restore."
-        }
-      }
+    "error": {
+      "cannot_connect": "Cannot connect to WLED device"
     }
   }
 }
