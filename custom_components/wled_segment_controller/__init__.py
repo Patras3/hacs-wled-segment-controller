@@ -6,7 +6,7 @@ from typing import Any
 
 import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant, ServiceCall, callback
+from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse, callback
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
@@ -297,7 +297,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         SERVICE_APPLY_EFFECT,
         handle_apply_effect,
         schema=APPLY_EFFECT_SCHEMA,
-        supports_response=False,
+        supports_response=SupportsResponse.NONE,
     )
 
     hass.services.async_register(
@@ -305,7 +305,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         SERVICE_RESTORE_SEGMENT,
         handle_restore_segment,
         schema=RESTORE_SEGMENT_SCHEMA,
-        supports_response=False,
+        supports_response=SupportsResponse.NONE,
     )
 
     hass.services.async_register(
@@ -313,7 +313,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         SERVICE_SAVE_STATE,
         handle_save_state,
         schema=SAVE_STATE_SCHEMA,
-        supports_response=False,
+        supports_response=SupportsResponse.NONE,
     )
 
     hass.services.async_register(
@@ -321,7 +321,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         SERVICE_RESTORE_STATE,
         handle_restore_state,
         schema=RESTORE_STATE_SCHEMA,
-        supports_response=False,
+        supports_response=SupportsResponse.NONE,
     )
 
     return True
