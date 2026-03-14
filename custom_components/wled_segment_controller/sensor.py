@@ -1,7 +1,7 @@
 """Sensor platform for WLED Segment Controller.
 
-Creates a sensor entity per WLED segment with proper names from WLED API.
-These entities serve as targets for segment controller services.
+Creates a sensor entity per WLED segment with proper names.
+Uses a shared coordinator to poll WLED once for all segments.
 """
 from __future__ import annotations
 
@@ -14,13 +14,18 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.update_coordinator import (
+    CoordinatorEntity,
+    DataUpdateCoordinator,
+    UpdateFailed,
+)
 
 from .api import WLEDApi, WLEDApiError
 from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
-SCAN_INTERVAL = datetime.timedelta(seconds=30)
+UPDATE_INTERVAL = datetime.timedelta(seconds=30)
 
 
 async def async_setup_entry(
@@ -37,12 +42,41 @@ async def async_setup_entry(
         _LOGGER.error("No host or segments in config entry")
         return
 
+    session = async_get_clientsession(hass)
+    api = WLEDApi(host, session)
+
+    async def _async_update_data() -> dict[str, Any]:
+        """Fetch full WLED state once for all segments."""
+        try:
+            state = await api.get_state()
+            effects_map = await api.get_effects_map()
+            reverse_effects = {v: k for k, v in effects_map.items()}
+            return {
+                "segments": {s.get("id", i): s for i, s in enumerate(state.get("seg", []))},
+                "effects": reverse_effects,
+                "on": state.get("on", False),
+                "bri": state.get("bri", 0),
+            }
+        except WLEDApiError as err:
+            raise UpdateFailed(f"Error communicating with WLED: {err}") from err
+
+    coordinator = DataUpdateCoordinator(
+        hass,
+        _LOGGER,
+        name=f"WLED Segment Controller ({device_name})",
+        update_method=_async_update_data,
+        update_interval=UPDATE_INTERVAL,
+    )
+
+    # Initial fetch
+    await coordinator.async_config_entry_first_refresh()
+
     entities = []
     for seg_id_str, seg_name in segments.items():
         seg_id = int(seg_id_str)
         entities.append(
             WLEDSegmentSensor(
-                hass=hass,
+                coordinator=coordinator,
                 host=host,
                 device_name=device_name,
                 segment_id=seg_id,
@@ -51,14 +85,14 @@ async def async_setup_entry(
             )
         )
 
-    async_add_entities(entities, update_before_add=True)
+    async_add_entities(entities)
 
 
-class WLEDSegmentSensor(SensorEntity):
+class WLEDSegmentSensor(CoordinatorEntity, SensorEntity):
     """Sensor representing a WLED segment.
 
-    Name format: "{WLED device name} - Segment - {segment name}"
-    Example: "WLED - Segment - Drzwi", "Garaż - Segment - Strip 1"
+    Name format: "{HA device title} - Segment - {segment name}"
+    Example: "Dom - Segment - Drzwi", "Garaż - Segment - Strip 1"
     """
 
     _attr_has_entity_name = False
@@ -66,7 +100,7 @@ class WLEDSegmentSensor(SensorEntity):
 
     def __init__(
         self,
-        hass: HomeAssistant,
+        coordinator: DataUpdateCoordinator,
         host: str,
         device_name: str,
         segment_id: int,
@@ -74,26 +108,15 @@ class WLEDSegmentSensor(SensorEntity):
         entry_id: str,
     ) -> None:
         """Initialize the sensor."""
-        self._hass = hass
+        super().__init__(coordinator)
         self._host = host
         self._device_name = device_name
         self._segment_id = segment_id
         self._segment_name = segment_name
 
-        # Name: "WLED - Segment - Drzwi"
+        # Name: "Dom - Segment - Drzwi"
         self._attr_name = f"{device_name} - Segment - {segment_name}"
         self._attr_unique_id = f"wled_sc_{entry_id}_{segment_id}"
-
-        # Initial state
-        self._attr_native_value = "Unknown"
-
-        # Attributes always available
-        self._attr_extra_state_attributes: dict[str, Any] = {
-            "segment_id": segment_id,
-            "segment_name": segment_name,
-            "wled_host": host,
-            "wled_device": device_name,
-        }
 
     @property
     def segment_id(self) -> int:
@@ -105,44 +128,49 @@ class WLEDSegmentSensor(SensorEntity):
         """Return the WLED host."""
         return self._host
 
-    async def async_update(self) -> None:
-        """Update sensor state from WLED API."""
-        try:
-            session = async_get_clientsession(self._hass)
-            api = WLEDApi(self._host, session)
-            seg_state = await api.get_segment_state(self._segment_id)
+    @property
+    def native_value(self) -> str | None:
+        """Return the current effect name."""
+        if not self.coordinator.data:
+            return None
 
-            effect_id = seg_state.get("fx", 0)
-            is_on = seg_state.get("on", False)
+        seg = self.coordinator.data.get("segments", {}).get(self._segment_id)
+        if not seg:
+            return None
 
-            # Get effect name
-            effects_map = await api.get_effects_map()
-            reverse_map = {v: k for k, v in effects_map.items()}
-            effect_name = reverse_map.get(effect_id, f"Effect {effect_id}")
+        is_on = seg.get("on", False)
+        if not is_on:
+            return "Off"
 
-            if is_on:
-                self._attr_native_value = effect_name
-            else:
-                self._attr_native_value = "Off"
+        effect_id = seg.get("fx", 0)
+        effects = self.coordinator.data.get("effects", {})
+        return effects.get(effect_id, f"Effect {effect_id}")
 
-            # Update attributes
-            colors = seg_state.get("col", [])
-            self._attr_extra_state_attributes.update(
-                {
-                    "effect": effect_name,
-                    "effect_id": effect_id,
-                    "brightness": seg_state.get("bri", 0),
-                    "on": is_on,
-                    "speed": seg_state.get("sx", 0),
-                    "intensity": seg_state.get("ix", 0),
-                    "colors": colors,
-                }
-            )
-            self._attr_available = True
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return entity attributes."""
+        attrs: dict[str, Any] = {
+            "segment_id": self._segment_id,
+            "segment_name": self._segment_name,
+            "wled_host": self._host,
+            "wled_device": self._device_name,
+        }
 
-        except WLEDApiError as err:
-            _LOGGER.debug("Failed to update segment %s: %s", self._segment_id, err)
-            self._attr_available = False
-        except Exception as err:
-            _LOGGER.debug("Unexpected error updating segment %s: %s", self._segment_id, err)
-            self._attr_available = False
+        if self.coordinator.data:
+            seg = self.coordinator.data.get("segments", {}).get(self._segment_id)
+            if seg:
+                effect_id = seg.get("fx", 0)
+                effects = self.coordinator.data.get("effects", {})
+                attrs.update(
+                    {
+                        "effect": effects.get(effect_id, f"Effect {effect_id}"),
+                        "effect_id": effect_id,
+                        "brightness": seg.get("bri", 0),
+                        "on": seg.get("on", False),
+                        "speed": seg.get("sx", 0),
+                        "intensity": seg.get("ix", 0),
+                        "colors": seg.get("col", []),
+                    }
+                )
+
+        return attrs

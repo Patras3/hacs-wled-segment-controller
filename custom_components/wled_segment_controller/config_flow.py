@@ -59,7 +59,8 @@ class WLEDSegmentControllerConfigFlow(ConfigFlow, domain=DOMAIN):
                 errors["base"] = "cannot_connect"
                 # Fall through to show form again
             else:
-                device_name = data.get("info", {}).get("name", "WLED")
+                # Use HA integration title (user may have renamed to "Dom", "Garaz")
+                device_name = entry.title or data.get("info", {}).get("name", "WLED")
                 segments = data.get("state", {}).get("seg", [])
 
                 # Build segment map: {id: name}
