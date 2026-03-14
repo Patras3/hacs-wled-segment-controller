@@ -67,7 +67,7 @@ class WLEDSegmentControllerConfigFlow(ConfigFlow, domain=DOMAIN):
                 for seg in segments:
                     if seg.get("stop", 0) > 0:
                         sid = str(seg.get("id", 0))
-                        sname = seg.get("n", f"Segment {sid}")
+                        sname = seg.get("n", "") or f"Segment {sid}"
                         seg_map[sid] = sname
 
                 return self.async_create_entry(
