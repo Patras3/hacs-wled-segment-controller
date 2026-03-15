@@ -53,10 +53,26 @@ def _build_colors(call_data: dict) -> list[list[int]] | None:
 
 
 def _extract_entity_ids(call: ServiceCall) -> list[str]:
-    """Extract entity_ids from service call."""
-    entity_ids = call.data.get("entity_id", [])
-    if isinstance(entity_ids, str):
-        entity_ids = [entity_ids]
+    """Extract entity_ids from service call (supports both target and data)."""
+    # HA 2024+ passes entity_id in call.target, not call.data
+    entity_ids: list[str] = []
+
+    # Try target first (HA 2024+ standard)
+    if hasattr(call, "target") and call.target:
+        target_entities = call.target.get("entity_id", [])
+        if isinstance(target_entities, str):
+            entity_ids = [target_entities]
+        elif target_entities:
+            entity_ids = list(target_entities)
+
+    # Fallback to call.data for backwards compatibility
+    if not entity_ids:
+        data_entities = call.data.get("entity_id", [])
+        if isinstance(data_entities, str):
+            entity_ids = [data_entities]
+        elif data_entities:
+            entity_ids = list(data_entities)
+
     return entity_ids
 
 
