@@ -169,6 +169,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
         Target entity_ids are our sensor entities (e.g. sensor.wled_dom_drzwi).
         Each entity has wled_host and segment_id attributes.
+
+        If the WLED master switch is off, it will be automatically turned on
+        (with only the target segments active).  When ``duration`` is set the
+        master and other segments are restored to their previous state
+        alongside the segment effect restore.
         """
         entity_ids = _extract_entity_ids(call)
         if not entity_ids:
@@ -197,6 +202,29 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             if effect is not None and effect_id is None:
                 continue
 
+            # --- Auto power-on logic ---
+            master_was_off = not await api.is_on()
+            other_segs_state: dict[int, bool] | None = None
+            target_seg_ids = {sid for _, sid in segments}
+
+            if master_was_off:
+                # Remember which other segments were on (likely none)
+                other_segs_state = await api.get_segments_on_state()
+                # Turn on master
+                await api.set_master_on(True)
+                # Turn off all segments except the ones we're targeting
+                segs_to_disable = {
+                    sid: False
+                    for sid, was_on in other_segs_state.items()
+                    if sid not in target_seg_ids
+                }
+                if segs_to_disable:
+                    await api.set_segments_on(segs_to_disable)
+                _LOGGER.info(
+                    "WLED %s was off — auto powered on for segment effect",
+                    host,
+                )
+
             for entity_id, segment_id in segments:
                 try:
                     if duration:
@@ -205,6 +233,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                         PENDING_RESTORES[restore_key] = {
                             "state": current_state,
                             "api_host": host,
+                            "master_was_off": master_was_off,
+                            "other_segs_state": other_segs_state,
                         }
 
                         @callback
@@ -234,19 +264,43 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     _LOGGER.error("Failed: segment %s: %s", segment_id, err)
 
     async def async_restore_segment_state(restore_key: str) -> None:
-        """Restore a segment to its saved state."""
+        """Restore a segment to its saved state.
+
+        If the WLED master was off before the effect was applied,
+        it will be turned off again after restoring the segment.
+        """
         if restore_key not in PENDING_RESTORES:
             return
 
         restore_data = PENDING_RESTORES.pop(restore_key)
         state = restore_data["state"]
         host = restore_data["api_host"]
+        master_was_off = restore_data.get("master_was_off", False)
+        other_segs_state = restore_data.get("other_segs_state")
         api = WLEDApi(host, session)
 
         try:
             segment_id = state.get("id", 0)
             await api.restore_segment(segment_id, state)
             _LOGGER.info("Restored segment %s on %s", segment_id, host)
+
+            # Restore other segments' on/off state if we changed them
+            if other_segs_state is not None:
+                segs_to_restore = {
+                    sid: was_on
+                    for sid, was_on in other_segs_state.items()
+                    if sid != segment_id
+                }
+                if segs_to_restore:
+                    await api.set_segments_on(segs_to_restore)
+
+            # Turn master off if it was off before
+            if master_was_off:
+                await api.set_master_on(False)
+                _LOGGER.info(
+                    "WLED %s master turned back off after restore", host
+                )
+
         except WLEDApiError as err:
             _LOGGER.error("Failed to restore segment: %s", err)
 
