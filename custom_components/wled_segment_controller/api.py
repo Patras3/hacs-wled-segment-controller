@@ -76,6 +76,31 @@ class WLEDApi:
 
         raise WLEDApiError(f"Segment ID {segment_id} not found")
 
+    async def is_on(self) -> bool:
+        """Check if WLED master is on."""
+        state = await self.get_state()
+        return state.get("on", False)
+
+    async def get_segments_on_state(self) -> dict[int, bool]:
+        """Get on/off state of all segments."""
+        state = await self.get_state()
+        return {
+            seg.get("id", i): seg.get("on", False)
+            for i, seg in enumerate(state.get("seg", []))
+            if seg.get("stop", 1) > 0  # skip empty segments
+        }
+
+    async def set_master_on(self, on: bool) -> dict[str, Any]:
+        """Turn WLED master on or off."""
+        return await self.set_state({"on": on})
+
+    async def set_segments_on(
+        self, segments: dict[int, bool]
+    ) -> dict[str, Any]:
+        """Set on/off state for multiple segments at once."""
+        seg_data = [{"id": sid, "on": on} for sid, on in segments.items()]
+        return await self.set_state({"seg": seg_data})
+
     async def apply_segment_effect(
         self,
         segment_id: int,
@@ -93,7 +118,7 @@ class WLEDApi:
             colors: List of up to 3 RGB colors [[R,G,B], [R,G,B], [R,G,B]]
             color: Single RGB color (legacy, use colors for multi)
         """
-        seg_data: dict[str, Any] = {"id": segment_id}
+        seg_data: dict[str, Any] = {"id": segment_id, "on": True}
 
         if colors is not None:
             seg_data["col"] = colors
@@ -112,7 +137,7 @@ class WLEDApi:
 
     async def restore_segment(self, segment_id: int, state: dict[str, Any]) -> None:
         """Restore a segment to a previous state."""
-        seg_data: dict[str, Any] = {"id": segment_id}
+        seg_data: dict[str, Any] = {"id": segment_id, "on": True}
 
         if "col" in state:
             seg_data["col"] = state["col"]
