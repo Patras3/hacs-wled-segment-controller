@@ -113,11 +113,23 @@ class WLEDApi:
         brightness: int | None = None,
     ) -> dict[str, Any]:
         """Apply effect settings to a specific segment.
-        
+
+        Sends a single atomic request that:
+        1. Turns on the WLED master (if needed)
+        2. Turns on the target segment with the effect
+        3. Preserves other segments' current on/off state
+
+        This prevents the race condition where WLED briefly enables all
+        segments between master power-on and individual segment control.
+
         Args:
             colors: List of up to 3 RGB colors [[R,G,B], [R,G,B], [R,G,B]]
             color: Single RGB color (legacy, use colors for multi)
         """
+        # Read current state to preserve other segments
+        current = await self.get_state()
+        current_segments = current.get("seg", [])
+
         seg_data: dict[str, Any] = {"id": segment_id, "on": True}
 
         if colors is not None:
@@ -133,11 +145,21 @@ class WLEDApi:
         if brightness is not None:
             seg_data["bri"] = brightness
 
-        return await self.set_state({"seg": [seg_data]})
+        # Build atomic payload: master on + target segment + all others preserved
+        all_segs: list[dict[str, Any]] = [seg_data]
+        for seg in current_segments:
+            sid = seg.get("id", current_segments.index(seg))
+            if sid != segment_id:
+                all_segs.append({"id": sid, "on": seg.get("on", False)})
+
+        return await self.set_state({"on": True, "seg": all_segs})
 
     async def restore_segment(self, segment_id: int, state: dict[str, Any]) -> None:
-        """Restore a segment to a previous state."""
-        seg_data: dict[str, Any] = {"id": segment_id, "on": True}
+        """Restore a segment to a previous state.
+
+        Preserves other segments' on/off state (same atomic approach as apply).
+        """
+        seg_data: dict[str, Any] = {"id": segment_id}
 
         if "col" in state:
             seg_data["col"] = state["col"]
@@ -149,10 +171,19 @@ class WLEDApi:
             seg_data["ix"] = state["ix"]
         if "bri" in state:
             seg_data["bri"] = state["bri"]
-        if "on" in state:
-            seg_data["on"] = state["on"]
+        seg_data["on"] = state.get("on", False)
 
-        await self.set_state({"seg": [seg_data]})
+        # Preserve other segments
+        current = await self.get_state()
+        current_segments = current.get("seg", [])
+
+        all_segs: list[dict[str, Any]] = [seg_data]
+        for seg in current_segments:
+            sid = seg.get("id", current_segments.index(seg))
+            if sid != segment_id:
+                all_segs.append({"id": sid, "on": seg.get("on", False)})
+
+        await self.set_state({"seg": all_segs})
 
     async def _get(self, path: str) -> dict[str, Any]:
         """Make GET request to WLED API."""

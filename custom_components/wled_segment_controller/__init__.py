@@ -202,26 +202,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             if effect is not None and effect_id is None:
                 continue
 
-            # --- Auto power-on logic ---
+            # Auto power-on is now handled atomically inside
+            # api.apply_segment_effect() — no race condition.
             master_was_off = not await api.is_on()
             other_segs_state: dict[int, bool] | None = None
-            target_seg_ids = {sid for _, sid in segments}
 
             if master_was_off:
-                # Remember which other segments were on (likely none)
                 other_segs_state = await api.get_segments_on_state()
-                # Turn on master
-                await api.set_master_on(True)
-                # Turn off all segments except the ones we're targeting
-                segs_to_disable = {
-                    sid: False
-                    for sid, was_on in other_segs_state.items()
-                    if sid not in target_seg_ids
-                }
-                if segs_to_disable:
-                    await api.set_segments_on(segs_to_disable)
                 _LOGGER.info(
-                    "WLED %s was off — auto powered on for segment effect",
+                    "WLED %s is off — will auto power on atomically",
                     host,
                 )
 
