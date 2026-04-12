@@ -184,7 +184,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         effect = call.data.get(ATTR_EFFECT)
         speed = call.data.get(ATTR_SPEED, DEFAULT_SPEED)
         intensity = call.data.get(ATTR_INTENSITY, DEFAULT_INTENSITY)
-        brightness = call.data.get(ATTR_BRIGHTNESS)
+        brightness = call.data.get(ATTR_BRIGHTNESS, 255)
         duration = call.data.get(ATTR_DURATION)
 
         # Group by host for efficiency
