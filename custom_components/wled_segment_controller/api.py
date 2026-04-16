@@ -1,6 +1,7 @@
 """Async WLED JSON API client."""
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -10,6 +11,8 @@ from aiohttp import ClientTimeout
 _LOGGER = logging.getLogger(__name__)
 
 DEFAULT_TIMEOUT = ClientTimeout(total=10)
+MAX_RETRIES = 5
+RETRY_DELAYS = [0.5, 1, 2, 4, 8]  # incremental backoff in seconds
 
 
 class WLEDApiError(Exception):
@@ -191,29 +194,49 @@ class WLEDApi:
 
         await self.set_state({"seg": all_segs})
 
+    async def _request(
+        self, method: str, path: str, data: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        """Make HTTP request to WLED API with retry and incremental backoff."""
+        url = f"{self._base_url}{path}"
+        last_err: Exception | None = None
+
+        for attempt in range(MAX_RETRIES):
+            try:
+                if method == "GET":
+                    req = self._session.get(url, timeout=DEFAULT_TIMEOUT)
+                else:
+                    req = self._session.post(
+                        url, json=data, timeout=DEFAULT_TIMEOUT
+                    )
+                async with req as resp:
+                    resp.raise_for_status()
+                    return await resp.json()
+            except aiohttp.ClientError as err:
+                last_err = err
+                if attempt < MAX_RETRIES - 1:
+                    delay = RETRY_DELAYS[attempt]
+                    _LOGGER.warning(
+                        "WLED %s request failed (attempt %d/%d): %s — retrying in %ss",
+                        self._host, attempt + 1, MAX_RETRIES, err, delay,
+                    )
+                    await asyncio.sleep(delay)
+
+        _LOGGER.error(
+            "WLED %s request failed after %d attempts: %s",
+            self._host, MAX_RETRIES, last_err,
+        )
+        raise WLEDApiError(
+            f"Error communicating with WLED: {last_err}"
+        ) from last_err
+
     async def _get(self, path: str) -> dict[str, Any]:
         """Make GET request to WLED API."""
-        url = f"{self._base_url}{path}"
-        try:
-            async with self._session.get(url, timeout=DEFAULT_TIMEOUT) as resp:
-                resp.raise_for_status()
-                return await resp.json()
-        except aiohttp.ClientError as err:
-            _LOGGER.error("Error communicating with WLED at %s: %s", self._host, err)
-            raise WLEDApiError(f"Error communicating with WLED: {err}") from err
+        return await self._request("GET", path)
 
     async def _post(self, path: str, data: dict[str, Any]) -> dict[str, Any]:
         """Make POST request to WLED API."""
-        url = f"{self._base_url}{path}"
-        try:
-            async with self._session.post(
-                url, json=data, timeout=DEFAULT_TIMEOUT
-            ) as resp:
-                resp.raise_for_status()
-                return await resp.json()
-        except aiohttp.ClientError as err:
-            _LOGGER.error("Error communicating with WLED at %s: %s", self._host, err)
-            raise WLEDApiError(f"Error communicating with WLED: {err}") from err
+        return await self._request("POST", path, data)
 
 
 def parse_color(color: str | list[int]) -> list[int]:
