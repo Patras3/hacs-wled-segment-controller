@@ -202,16 +202,23 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             if effect is not None and effect_id is None:
                 continue
 
-            # Auto power-on is now handled atomically inside
-            # api.apply_segment_effect() — no race condition.
-            master_was_off = not await api.is_on()
+            # Fetch current state once: master on/off, master brightness,
+            # and segment on-states (used for restore after duration).
+            pre_state = await api.get_state()
+            master_was_off = not pre_state.get("on", False)
+            prev_master_bri = pre_state.get("bri", 255)
             other_segs_state: dict[int, bool] | None = None
 
             if master_was_off:
-                other_segs_state = await api.get_segments_on_state()
+                other_segs_state = {
+                    seg.get("id", i): seg.get("on", False)
+                    for i, seg in enumerate(pre_state.get("seg", []))
+                    if seg.get("stop", 1) > 0
+                }
                 _LOGGER.info(
-                    "WLED %s is off — will auto power on atomically",
+                    "WLED %s is off (master bri=%s) — will auto power on",
                     host,
+                    prev_master_bri,
                 )
 
             for entity_id, segment_id in segments:
@@ -224,6 +231,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                             "api_host": host,
                             "master_was_off": master_was_off,
                             "other_segs_state": other_segs_state,
+                            "prev_master_bri": prev_master_bri,
                         }
 
                         @callback
@@ -243,6 +251,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                         speed=speed,
                         intensity=intensity,
                         brightness=brightness,
+                        master_bri=255,
                     )
 
                     _LOGGER.info(
@@ -256,7 +265,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         """Restore a segment to its saved state.
 
         If the WLED master was off before the effect was applied,
-        it will be turned off again after restoring the segment.
+        it will be turned off again after restoring the segment —
+        UNLESS something else changed the master state in the meantime
+        (e.g. a sunset timer activated a preset).  We detect this by
+        checking whether master brightness is still 255 (the value we
+        forced).  If it changed, an external source took over and we
+        leave the master alone.
         """
         if restore_key not in PENDING_RESTORES:
             return
@@ -266,15 +280,29 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         host = restore_data["api_host"]
         master_was_off = restore_data.get("master_was_off", False)
         other_segs_state = restore_data.get("other_segs_state")
+        prev_master_bri = restore_data.get("prev_master_bri")
         api = WLEDApi(host, session)
 
         try:
             segment_id = state.get("id", 0)
+
+            # Check if something else changed master state during the effect
+            current = await api.get_state()
+            current_master_bri = current.get("bri", 255)
+            master_changed_externally = current_master_bri != 255
+
             await api.restore_segment(segment_id, state)
             _LOGGER.info("Restored segment %s on %s", segment_id, host)
 
-            # Restore other segments' on/off state if we changed them
-            if other_segs_state is not None:
+            if master_changed_externally:
+                _LOGGER.info(
+                    "WLED %s master bri changed to %s during effect "
+                    "(external source, e.g. timer) — skipping master restore",
+                    host,
+                    current_master_bri,
+                )
+            elif other_segs_state is not None:
+                # Restore other segments' on/off state if we changed them
                 segs_to_restore = {
                     sid: was_on
                     for sid, was_on in other_segs_state.items()
@@ -283,12 +311,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 if segs_to_restore:
                     await api.set_segments_on(segs_to_restore)
 
-            # Turn master off if it was off before
-            if master_was_off:
+            # Only restore master if nothing else touched it
+            if master_changed_externally:
+                pass
+            elif master_was_off:
                 await api.set_master_on(False)
                 _LOGGER.info(
                     "WLED %s master turned back off after restore", host
                 )
+            elif prev_master_bri is not None:
+                await api.set_state({"bri": prev_master_bri})
 
         except WLEDApiError as err:
             _LOGGER.error("Failed to restore segment: %s", err)

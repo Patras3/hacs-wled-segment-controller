@@ -111,6 +111,7 @@ class WLEDApi:
         speed: int | None = None,
         intensity: int | None = None,
         brightness: int | None = None,
+        master_bri: int | None = None,
     ) -> dict[str, Any]:
         """Apply effect settings to a specific segment.
 
@@ -125,6 +126,8 @@ class WLEDApi:
         Args:
             colors: List of up to 3 RGB colors [[R,G,B], [R,G,B], [R,G,B]]
             color: Single RGB color (legacy, use colors for multi)
+            master_bri: If set, override master brightness (avoids stale
+                low values left by presets like "Wylaczone").
         """
         # Read current state to preserve other segments
         current = await self.get_state()
@@ -152,7 +155,10 @@ class WLEDApi:
             if sid != segment_id:
                 all_segs.append({"id": sid, "on": seg.get("on", False)})
 
-        return await self.set_state({"on": True, "seg": all_segs})
+        payload: dict[str, Any] = {"on": True, "seg": all_segs}
+        if master_bri is not None:
+            payload["bri"] = master_bri
+        return await self.set_state(payload)
 
     async def restore_segment(self, segment_id: int, state: dict[str, Any]) -> None:
         """Restore a segment to a previous state.
